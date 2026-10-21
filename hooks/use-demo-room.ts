@@ -38,8 +38,9 @@ export function useDemoRoom(roomCode: string) {
   }, [playback]);
 
   useEffect(() => {
-    const actorId = sessionStorage.getItem("yaazh-actor") ?? crypto.randomUUID();
-    sessionStorage.setItem("yaazh-actor", actorId);
+    // Keep this identity in memory so duplicated tabs cannot inherit the same
+    // sessionStorage value and mistakenly ignore one another.
+    const actorId = crypto.randomUUID();
     actorIdRef.current = actorId;
 
     if (!("BroadcastChannel" in window)) return;

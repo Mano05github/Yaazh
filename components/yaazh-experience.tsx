@@ -23,11 +23,13 @@ import {
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { MascotPair, MascotScene } from "./mascot";
 import { useDemoRoom } from "@/hooks/use-demo-room";
+import { useYaazhRoom } from "@/hooks/use-yaazh-room";
+import type { YaazhMessage } from "@/lib/rooms/types";
 
 export type Screen = "landing" | "invite" | "lobby" | "player";
 type LocalMedia = { name: string; url: string; type: "audio" | "video" } | null;
 
-const roomCode = "MOON-27";
+const demoRoomCode = "MOON-27";
 const reactions = ["♥", "🥹", "😂", "🫶"];
 
 function formatTime(seconds: number) {
@@ -35,16 +37,24 @@ function formatTime(seconds: number) {
   return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
 }
 
-export function YaazhExperience({ initialScreen = "landing" }: { initialScreen?: Screen }) {
+export function YaazhExperience({
+  initialScreen = "landing",
+  initialRoomCode,
+}: {
+  initialScreen?: Screen;
+  initialRoomCode?: string;
+}) {
+  const liveRoom = useYaazhRoom();
   const [screen, setScreen] = useState<Screen>(initialScreen);
-  const [joinMode, setJoinMode] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
+  const [joinMode, setJoinMode] = useState(Boolean(initialRoomCode));
+  const [joinCode, setJoinCode] = useState(initialRoomCode ?? "");
+  const [roomCode, setRoomCode] = useState(initialRoomCode ?? demoRoomCode);
   const [copied, setCopied] = useState(false);
   const [ready, setReady] = useState(false);
-  const [partnerReady, setPartnerReady] = useState(initialScreen === "lobby");
   const [countdown, setCountdown] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [localMedia, setLocalMedia] = useState<LocalMedia>(null);
+  const partnerReady = liveRoom.room ? liveRoom.partnerPresent : initialScreen === "lobby";
 
   useEffect(() => {
     return () => {
@@ -52,20 +62,32 @@ export function YaazhExperience({ initialScreen = "landing" }: { initialScreen?:
     };
   }, [localMedia]);
 
-  const createRoom = () => {
-    setJoinMode(false);
-    setScreen("invite");
+  const createRoom = async () => {
+    try {
+      const created = await liveRoom.createRoom();
+      setRoomCode(created.code);
+      setJoinMode(false);
+      window.history.replaceState({}, "", `/?room=${encodeURIComponent(created.code)}`);
+      setScreen("invite");
+    } catch {
+      // The hook exposes the actionable error in the room notice.
+    }
   };
 
-  const joinRoom = () => {
+  const joinRoom = async () => {
     if (!joinCode.trim()) return;
-    setScreen("lobby");
-    window.setTimeout(() => setPartnerReady(true), 1200);
+    try {
+      const joined = await liveRoom.joinRoom(joinCode);
+      setRoomCode(joined.code);
+      window.history.replaceState({}, "", `/?room=${encodeURIComponent(joined.code)}`);
+      setScreen("lobby");
+    } catch {
+      // The hook exposes the actionable error in the room notice.
+    }
   };
 
   const enterLobby = () => {
     setScreen("lobby");
-    window.setTimeout(() => setPartnerReady(true), 1500);
   };
 
   const copyInvite = async () => {
@@ -109,6 +131,15 @@ export function YaazhExperience({ initialScreen = "landing" }: { initialScreen?:
       <Atmosphere />
       <Header screen={screen} onLogoClick={() => setScreen("landing")} />
 
+      <AnimatePresence>
+        {liveRoom.error && (
+          <motion.div className="room-notice" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} role="alert">
+            <span>{liveRoom.error}</span>
+            <button onClick={liveRoom.clearError} aria-label="Dismiss room error"><X size={15} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="sync">
         {screen === "landing" && (
           <Landing
@@ -123,11 +154,12 @@ export function YaazhExperience({ initialScreen = "landing" }: { initialScreen?:
           />
         )}
         {screen === "invite" && (
-          <Invite key="invite" copied={copied} onCopy={copyInvite} onBack={() => setScreen("landing")} onEnter={enterLobby} />
+          <Invite key="invite" roomCode={roomCode} copied={copied} onCopy={copyInvite} onBack={() => setScreen("landing")} onEnter={enterLobby} />
         )}
         {screen === "lobby" && (
           <Lobby
             key="lobby"
+            roomCode={roomCode}
             ready={ready}
             partnerReady={partnerReady}
             onReady={() => setReady((value) => !value)}
@@ -143,6 +175,13 @@ export function YaazhExperience({ initialScreen = "landing" }: { initialScreen?:
             chatOpen={chatOpen}
             onChat={() => setChatOpen((value) => !value)}
             onLeave={() => setScreen("lobby")}
+            roomCode={roomCode}
+            roomPartnerPresent={liveRoom.partnerPresent}
+            roomChat={liveRoom.room ? {
+                messages: liveRoom.messages,
+                currentUserId: liveRoom.user?.id ?? null,
+                sendMessage: liveRoom.sendMessage,
+              } : undefined}
           />
         )}
       </AnimatePresence>
@@ -257,7 +296,7 @@ function Landing(props: LandingProps) {
   );
 }
 
-function Invite({ copied, onCopy, onBack, onEnter }: { copied: boolean; onCopy: () => void; onBack: () => void; onEnter: () => void }) {
+function Invite({ roomCode, copied, onCopy, onBack, onEnter }: { roomCode: string; copied: boolean; onCopy: () => void; onBack: () => void; onEnter: () => void }) {
   return (
     <motion.section className="screen centered-screen" initial={false} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <button className="back-button" onClick={onBack}><ArrowLeft size={17} /> Back</button>
@@ -281,14 +320,14 @@ function Invite({ copied, onCopy, onBack, onEnter }: { copied: boolean; onCopy: 
             {copied ? <><Check size={18} /> Invite copied</> : <><Copy size={18} /> Copy private invitation</>}
           </button>
           <button className="button button-ghost wide-button" onClick={onEnter}>Enter our room <ChevronRight size={18} /></button>
-          <div className="privacy-note"><span className="status-dot" /> Demo room · realtime credentials not connected yet</div>
+          <div className="privacy-note"><span className="status-dot" /> Private realtime room · only two participants</div>
         </div>
       </div>
     </motion.section>
   );
 }
 
-function Lobby({ ready, partnerReady, onReady, onBegin, onBack }: { ready: boolean; partnerReady: boolean; onReady: () => void; onBegin: () => void; onBack: () => void }) {
+function Lobby({ roomCode, ready, partnerReady, onReady, onBegin, onBack }: { roomCode: string; ready: boolean; partnerReady: boolean; onReady: () => void; onBegin: () => void; onBack: () => void }) {
   return (
     <motion.section className="screen centered-screen" initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <button className="back-button" onClick={onBack}><ArrowLeft size={17} /> Invitation</button>
@@ -349,14 +388,22 @@ type PlayerProps = {
   chatOpen: boolean;
   onChat: () => void;
   onLeave: () => void;
+  roomCode: string;
+  roomPartnerPresent: boolean;
+  roomChat?: {
+    messages: YaazhMessage[];
+    currentUserId: string | null;
+    sendMessage: (body: string) => Promise<boolean>;
+  };
 };
 
-function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave }: PlayerProps) {
-  const { playback, updatePlayback, partnerPresent, incomingReaction, sendReaction } = useDemoRoom(roomCode);
+function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode, roomPartnerPresent, roomChat }: PlayerProps) {
+  const { playback, updatePlayback, partnerPresent: demoPartnerPresent, incomingReaction, sendReaction } = useDemoRoom(roomCode);
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const [volume, setVolume] = useState(72);
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState(["Made it ♥", "This one is ours."]);
+  const [demoMessages, setDemoMessages] = useState(["Made it ♥", "This one is ours."]);
+  const partnerPresent = roomPartnerPresent || demoPartnerPresent;
 
   useEffect(() => {
     if (localMedia) return;
@@ -390,9 +437,15 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave }: Player
   const position = playback.position;
   const progress = Math.min(100, (position / Math.max(duration, 1)) * 100);
 
-  const sendMessage = () => {
-    if (!message.trim()) return;
-    setMessages((items) => [...items, message.trim()]);
+  const sendMessage = async () => {
+    const nextMessage = message.trim();
+    if (!nextMessage) return;
+    if (roomChat) {
+      const sent = await roomChat.sendMessage(nextMessage);
+      if (sent) setMessage("");
+      return;
+    }
+    setDemoMessages((items) => [...items, nextMessage]);
     setMessage("");
   };
 
@@ -483,9 +536,14 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave }: Player
             <div className="chat-header"><div><span>Just between us</span><strong>Tonight’s whispers</strong></div><button className="icon-button" onClick={onChat}><X size={18} /></button></div>
             <div className="chat-messages">
               <div className="chat-day">Tonight</div>
-              {messages.map((item, index) => <div key={`${item}-${index}`} className={`chat-message ${index % 2 ? "mine" : "theirs"}`}>{item}<span>{index % 2 ? "You" : "Dudu"}</span></div>)}
+              {roomChat
+                ? roomChat.messages.map((item) => {
+                    const mine = item.sender_id === roomChat.currentUserId;
+                    return <div key={item.id} className={`chat-message ${mine ? "mine" : "theirs"}`}>{item.body}<span>{mine ? "You" : "Your person"}</span></div>;
+                  })
+                : demoMessages.map((item, index) => <div key={`${item}-${index}`} className={`chat-message ${index % 2 ? "mine" : "theirs"}`}>{item}<span>{index % 2 ? "You" : "Dudu"}</span></div>)}
             </div>
-            <div className="chat-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && sendMessage()} placeholder="Say something soft…" /><button onClick={sendMessage}><Send size={17} /></button></div>
+            <div className="chat-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendMessage(); }} placeholder="Say something soft…" /><button onClick={() => void sendMessage()}><Send size={17} /></button></div>
           </motion.aside>
         )}
       </AnimatePresence>

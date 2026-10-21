@@ -35,6 +35,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--rose); outl
 .brand-mark { width: 29px; height: 29px; border-radius: 50%; display: grid; place-items: center; color: #3a111d; background: linear-gradient(145deg, #ffd6d2, #dc7e90); box-shadow: 0 0 28px rgba(236, 132, 151, .35); font-size: 13px; }
 .header-status { color: var(--muted); font-size: 12px; letter-spacing: .04em; display: flex; align-items: center; gap: 8px; }
 .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e393a1; box-shadow: 0 0 11px #e393a1; }
+.room-notice { position: fixed; z-index: 80; top: 82px; left: 50%; width: min(620px, calc(100vw - 32px)); translate: -50% 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px 12px 18px; border: 1px solid rgba(255, 179, 188, .35); border-radius: 16px; color: #ffe9e9; background: rgba(74, 19, 36, .96); box-shadow: 0 18px 55px rgba(0,0,0,.4); backdrop-filter: blur(18px); font-size: 12px; }
+.room-notice button { flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; color: inherit; background: rgba(255,255,255,.08); cursor: pointer; }
 
 .screen { min-height: calc(100svh - 78px); position: relative; padding: 32px clamp(24px, 6vw, 96px) 54px; }
 .landing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, .9fr); align-items: center; gap: clamp(40px, 7vw, 120px); max-width: 1500px; margin: auto; }
