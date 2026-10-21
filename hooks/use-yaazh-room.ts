@@ -4,7 +4,12 @@ import type { RealtimeChannel, User } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { YaazhMessage, YaazhRoom } from "@/lib/rooms/types";
+import type {
+  PlaybackCommand,
+  YaazhMessage,
+  YaazhPlaybackState,
+  YaazhRoom,
+} from "@/lib/rooms/types";
 
 type RoomStatus =
   | "authenticating"
@@ -53,6 +58,7 @@ export function useYaazhRoom() {
   const [ready, setReady] = useState(false);
   const [partnerReady, setPartnerReady] = useState(false);
   const [beginSignal, setBeginSignal] = useState<BeginSignal | null>(null);
+  const [playback, setPlayback] = useState<YaazhPlaybackState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const tabIdRef = useRef("");
@@ -116,6 +122,12 @@ export function useYaazhRoom() {
       }
     };
 
+    const applyPlayback = (nextPlayback: YaazhPlaybackState) => {
+      setPlayback((current) =>
+        !current || nextPlayback.version >= current.version ? nextPlayback : current,
+      );
+    };
+
     supabase
       .from("messages")
       .select("id, room_id, sender_id, body, created_at")
@@ -147,6 +159,22 @@ export function useYaazhRoom() {
         }
       });
 
+    supabase
+      .from("playback_state")
+      .select(
+        "room_id, media_id, media_title, media_source, media_thumbnail, playing, position_ms, duration_ms, version, effective_at, updated_at, updated_by",
+      )
+      .eq("room_id", room.id)
+      .single()
+      .then(({ data, error: playbackError }) => {
+        if (!active) return;
+        if (playbackError) {
+          setError(playbackError.message);
+          return;
+        }
+        applyPlayback(data as YaazhPlaybackState);
+      });
+
     const channel = supabase
       .channel(`room:${room.id}`, {
         config: { presence: { key: tabIdRef.current } },
@@ -170,6 +198,16 @@ export function useYaazhRoom() {
           filter: `room_id=eq.${room.id}`,
         },
         (payload) => applyReadiness(payload.new as RoomMemberReadiness),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "playback_state",
+          filter: `room_id=eq.${room.id}`,
+        },
+        (payload) => applyPlayback(payload.new as YaazhPlaybackState),
       )
       .on("broadcast", { event: "begin_together" }, ({ payload }) => {
         const signal = payload as Partial<BeginSignal>;
@@ -203,6 +241,7 @@ export function useYaazhRoom() {
       active = false;
       setPartnerPresent(false);
       setPartnerReady(false);
+      setPlayback(null);
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
@@ -347,6 +386,62 @@ export function useYaazhRoom() {
     return true;
   }, [partnerPresent, partnerReady, ready, room, user]);
 
+  const updatePlayback = useCallback(
+    async (command: PlaybackCommand) => {
+      if (!room || !user || !playback) return false;
+
+      const changedMedia = command.mediaId !== undefined && command.mediaId !== playback.media_id;
+      const optimistic: YaazhPlaybackState = {
+        ...playback,
+        media_id: command.mediaId ?? playback.media_id,
+        media_title: command.mediaTitle ?? playback.media_title,
+        media_source: command.mediaSource ?? playback.media_source,
+        media_thumbnail: command.mediaThumbnail ?? playback.media_thumbnail,
+        playing: changedMedia ? (command.playing ?? false) : (command.playing ?? playback.playing),
+        position_ms: changedMedia
+          ? (command.positionMs ?? 0)
+          : (command.positionMs ?? playback.position_ms),
+        duration_ms: changedMedia
+          ? (command.durationMs ?? null)
+          : (command.durationMs ?? playback.duration_ms),
+        version: playback.version + 1,
+        effective_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        updated_by: user.id,
+      };
+      setPlayback(optimistic);
+
+      const { data, error: playbackError } = await getSupabaseBrowserClient().rpc(
+        "update_room_playback",
+        {
+          p_room_id: room.id,
+          p_media_id: command.mediaId ?? null,
+          p_media_title: command.mediaTitle ?? null,
+          p_media_source: command.mediaSource ?? null,
+          p_media_thumbnail: command.mediaThumbnail ?? null,
+          p_playing: command.playing ?? null,
+          p_position_ms: command.positionMs ?? null,
+          p_duration_ms: command.durationMs ?? null,
+        },
+      );
+
+      if (playbackError) {
+        setPlayback((current) => current?.version === optimistic.version ? playback : current);
+        setError(playbackError.message);
+        return false;
+      }
+
+      const stored = (data as YaazhPlaybackState[] | null)?.[0];
+      if (stored) {
+        setPlayback((current) =>
+          !current || stored.version >= current.version ? stored : current,
+        );
+      }
+      return true;
+    },
+    [playback, room, user],
+  );
+
   const clearError = useCallback(() => setError(null), []);
 
   return {
@@ -358,12 +453,14 @@ export function useYaazhRoom() {
     ready,
     partnerReady,
     beginSignal,
+    playback,
     error,
     createRoom,
     joinRoom,
     sendMessage,
     setReady: setRoomReady,
     beginTogether,
+    updatePlayback,
     clearError,
   };
 }

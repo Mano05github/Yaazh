@@ -20,11 +20,17 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MascotPair, MascotScene } from "./mascot";
+import { RoomCatalogPicker } from "./room-catalog-picker";
+import { YouTubeRoomPlayer } from "./youtube-room-player";
 import { useDemoRoom } from "@/hooks/use-demo-room";
 import { useYaazhRoom } from "@/hooks/use-yaazh-room";
-import type { YaazhMessage } from "@/lib/rooms/types";
+import type {
+  PlaybackCommand,
+  YaazhMessage,
+  YaazhPlaybackState,
+} from "@/lib/rooms/types";
 
 export type Screen = "landing" | "invite" | "lobby" | "player";
 type LocalMedia = { name: string; url: string; type: "audio" | "video" } | null;
@@ -140,6 +146,15 @@ export function YaazhExperience({
       url: URL.createObjectURL(file),
       type: file.type.startsWith("video") ? "video" : "audio",
     });
+    if (liveRoom.room) {
+      void liveRoom.updatePlayback({
+        mediaId: `local:${file.name}:${file.size}`,
+        mediaTitle: file.name,
+        mediaSource: "local",
+        playing: false,
+        positionMs: 0,
+      });
+    }
   };
 
   return (
@@ -200,6 +215,10 @@ export function YaazhExperience({
             onLeave={() => setScreen("lobby")}
             roomCode={roomCode}
             roomPartnerPresent={liveRoom.partnerPresent}
+            roomPlayback={liveRoom.room && liveRoom.playback ? {
+              state: liveRoom.playback,
+              update: liveRoom.updatePlayback,
+            } : undefined}
             roomChat={liveRoom.room ? {
                 messages: liveRoom.messages,
                 currentUserId: liveRoom.user?.id ?? null,
@@ -234,9 +253,12 @@ function Header({ screen, onLogoClick }: { screen: Screen; onLogoClick: () => vo
         <span className="brand-mark">யா</span>
         <span>Yaazh</span>
       </button>
-      <div className="header-status">
-        <span className="status-dot" />
-        {screen === "landing" ? "A private place for two" : "Private room"}
+      <div className="site-header-right">
+        {screen === "landing" && <nav className="site-nav"><a href="/music">Music</a><a href="/watch">Watch</a></nav>}
+        <div className="header-status">
+          <span className="status-dot" />
+          {screen === "landing" ? "A private place for two" : "Private room"}
+        </div>
       </div>
     </header>
   );
@@ -413,6 +435,10 @@ type PlayerProps = {
   onLeave: () => void;
   roomCode: string;
   roomPartnerPresent: boolean;
+  roomPlayback?: {
+    state: YaazhPlaybackState;
+    update: (command: PlaybackCommand) => Promise<boolean>;
+  };
   roomChat?: {
     messages: YaazhMessage[];
     currentUserId: string | null;
@@ -420,22 +446,54 @@ type PlayerProps = {
   };
 };
 
-function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode, roomPartnerPresent, roomChat }: PlayerProps) {
-  const { playback, updatePlayback, partnerPresent: demoPartnerPresent, incomingReaction, sendReaction } = useDemoRoom(roomCode);
+function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode, roomPartnerPresent, roomPlayback, roomChat }: PlayerProps) {
+  const { playback: demoPlayback, updatePlayback: updateDemoPlayback, partnerPresent: demoPartnerPresent, incomingReaction, sendReaction } = useDemoRoom(roomCode);
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const [volume, setVolume] = useState(72);
+  const [playbackClock, setPlaybackClock] = useState(0);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [demoMessages, setDemoMessages] = useState(["Made it ♥", "This one is ours."]);
   const partnerPresent = roomPartnerPresent || demoPartnerPresent;
+  const livePlayback = roomPlayback?.state;
+  const effectiveTime = livePlayback?.effective_at ? Date.parse(livePlayback.effective_at) : 0;
+  const livePosition = livePlayback
+    ? livePlayback.position_ms / 1000 + (livePlayback.playing ? Math.max(0, playbackClock - effectiveTime) / 1000 : 0)
+    : null;
+  const playback = livePlayback ? {
+    playing: livePlayback.playing,
+    position: Math.min(livePosition ?? 0, (livePlayback.duration_ms ?? Number.MAX_SAFE_INTEGER) / 1000),
+    duration: (livePlayback.duration_ms ?? 0) / 1000,
+  } : demoPlayback;
+  const youtubeId = livePlayback?.media_source === "youtube" ? livePlayback.media_id : null;
+
+  const updatePlayback = useCallback((next: Partial<Pick<typeof playback, "playing" | "position" | "duration">>) => {
+    if (roomPlayback) {
+      const command: PlaybackCommand = {};
+      if (next.playing !== undefined) command.playing = next.playing;
+      if (next.position !== undefined) command.positionMs = Math.max(0, Math.round(next.position * 1000));
+      if (next.duration !== undefined) command.durationMs = Math.max(0, Math.round(next.duration * 1000));
+      void roomPlayback.update(command);
+      return;
+    }
+    updateDemoPlayback(next);
+  }, [roomPlayback, updateDemoPlayback]);
 
   useEffect(() => {
+    if (!livePlayback?.playing) return;
+    const timer = window.setInterval(() => setPlaybackClock(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [livePlayback?.playing]);
+
+  useEffect(() => {
+    if (roomPlayback) return;
     if (localMedia) return;
     if (!playback.playing) return;
     const timer = window.setInterval(() => {
       updatePlayback({ position: Math.min(playback.duration, playback.position + 1) });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [localMedia, playback.duration, playback.playing, playback.position, updatePlayback]);
+  }, [localMedia, playback.duration, playback.playing, playback.position, roomPlayback, updatePlayback]);
 
   useEffect(() => {
     const media = mediaRef.current;
@@ -455,7 +513,7 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode
     updatePlayback({ position });
   };
 
-  const title = localMedia?.name ?? "Until We Meet Again";
+  const title = livePlayback?.media_title ?? localMedia?.name ?? "Until We Meet Again";
   const duration = playback.duration;
   const position = playback.position;
   const progress = Math.min(100, (position / Math.max(duration, 1)) * 100);
@@ -486,15 +544,30 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode
       <div className="player-stage">
         <div className="ambient-disc disc-one" />
         <div className="ambient-disc disc-two" />
-        {localMedia?.type === "video" ? (
+        {youtubeId ? (
+          <YouTubeRoomPlayer
+            key={youtubeId}
+            videoId={youtubeId}
+            playing={playback.playing}
+            position={playback.position}
+            version={livePlayback?.version ?? 0}
+            volume={volume}
+            onPlaybackChange={(nextPlaying, nextPosition) => updatePlayback({ playing: nextPlaying, position: nextPosition })}
+            onDuration={(nextDuration) => {
+              if (nextDuration > 0 && Math.abs(nextDuration - playback.duration) > 1) {
+                updatePlayback({ duration: nextDuration });
+              }
+            }}
+          />
+        ) : localMedia?.type === "video" ? (
           <video
             ref={(element) => { mediaRef.current = element; }}
             className="local-video"
             src={localMedia.url}
             playsInline
-            onLoadedMetadata={(event) => updatePlayback({ duration: event.currentTarget.duration, position: 0 })}
+            onLoadedMetadata={(event) => updatePlayback({ duration: event.currentTarget.duration })}
             onTimeUpdate={(event) => {
-              if (Math.floor(event.currentTarget.currentTime) !== Math.floor(playback.position)) {
+              if (!roomPlayback && Math.floor(event.currentTarget.currentTime) !== Math.floor(playback.position)) {
                 updatePlayback({ position: event.currentTarget.currentTime });
               }
             }}
@@ -510,7 +583,7 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode
               <audio
                 ref={(element) => { mediaRef.current = element; }}
                 src={localMedia.url}
-                onLoadedMetadata={(event) => updatePlayback({ duration: event.currentTarget.duration, position: 0 })}
+                onLoadedMetadata={(event) => updatePlayback({ duration: event.currentTarget.duration })}
               />
             )}
           </div>
@@ -526,8 +599,11 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode
       </div>
 
       <div className="now-playing">
-        <div className="track-copy"><span>PLAYING FOR TWO</span><h2>{title}</h2><p>{localMedia ? "From your device" : "Demo soundtrack · Bubu & Dudu"}</p></div>
-        <label className="add-media button button-ghost"><Plus size={17} /> Choose media<input type="file" accept="audio/*,video/mp4,video/webm" onChange={onChooseMedia} /></label>
+        <div className="track-copy"><span>PLAYING FOR TWO</span><h2>{title}</h2><p>{youtubeId ? "YouTube · selected for this room" : localMedia ? "From your device" : "Demo soundtrack · Bubu & Dudu"}</p></div>
+        <div className="media-actions">
+          {roomPlayback && <button className="button button-primary" onClick={() => setCatalogOpen(true)}><Play size={16} /> Browse together</button>}
+          <label className="add-media button button-ghost"><Plus size={17} /> Choose media<input type="file" accept="audio/*,video/mp4,video/webm" onChange={onChooseMedia} /></label>
+        </div>
       </div>
 
       <div className="timeline">
@@ -570,6 +646,24 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode
           </motion.aside>
         )}
       </AnimatePresence>
+
+      {catalogOpen && roomPlayback && (
+        <RoomCatalogPicker
+          onClose={() => setCatalogOpen(false)}
+          onSelect={(item) => {
+            void roomPlayback.update({
+              mediaId: item.id,
+              mediaTitle: item.title,
+              mediaSource: "youtube",
+              mediaThumbnail: item.thumbnail,
+              durationMs: item.durationSeconds === null ? undefined : item.durationSeconds * 1000,
+              playing: false,
+              positionMs: 0,
+            });
+            setCatalogOpen(false);
+          }}
+        />
+      )}
     </motion.section>
   );
 }
