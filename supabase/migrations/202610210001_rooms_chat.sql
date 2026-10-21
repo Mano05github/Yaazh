@@ -14,6 +14,7 @@ create table public.room_members (
   user_id uuid not null references auth.users(id) on delete cascade,
   display_name text not null check (char_length(display_name) between 1 and 32),
   role text not null check (role in ('owner', 'member')),
+  is_ready boolean not null default false,
   joined_at timestamptz not null default now(),
   primary key (room_id, user_id)
 );
@@ -49,6 +50,7 @@ alter table public.playback_state enable row level security;
 
 grant select on public.rooms to authenticated;
 grant select on public.room_members to authenticated;
+grant update (is_ready) on public.room_members to authenticated;
 grant select, insert on public.messages to authenticated;
 grant select on public.playback_state to authenticated;
 
@@ -79,6 +81,18 @@ create policy "Members can read room membership"
 on public.room_members for select
 to authenticated
 using (public.is_room_member(room_id));
+
+create policy "Members can update their readiness"
+on public.room_members for update
+to authenticated
+using (
+  user_id = auth.uid()
+  and public.is_room_member(room_id)
+)
+with check (
+  user_id = auth.uid()
+  and public.is_room_member(room_id)
+);
 
 create policy "Members can read room messages"
 on public.messages for select

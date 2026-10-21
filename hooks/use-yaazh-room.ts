@@ -19,6 +19,16 @@ type RoomRpcRow = {
   room_code: string;
 };
 
+type RoomMemberReadiness = {
+  user_id: string;
+  is_ready: boolean;
+};
+
+type BeginSignal = {
+  id: string;
+  startAt: string;
+};
+
 function readableError(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -40,6 +50,9 @@ export function useYaazhRoom() {
   const [room, setRoom] = useState<YaazhRoom | null>(null);
   const [messages, setMessages] = useState<YaazhMessage[]>([]);
   const [partnerPresent, setPartnerPresent] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [partnerReady, setPartnerReady] = useState(false);
+  const [beginSignal, setBeginSignal] = useState<BeginSignal | null>(null);
   const [error, setError] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const tabIdRef = useRef("");
@@ -95,6 +108,14 @@ export function useYaazhRoom() {
       });
     };
 
+    const applyReadiness = (member: RoomMemberReadiness) => {
+      if (member.user_id === user.id) {
+        setReady(member.is_ready);
+      } else {
+        setPartnerReady(member.is_ready);
+      }
+    };
+
     supabase
       .from("messages")
       .select("id, room_id, sender_id, body, created_at")
@@ -108,6 +129,22 @@ export function useYaazhRoom() {
           return;
         }
         setMessages(sortMessages((data ?? []) as YaazhMessage[]));
+      });
+
+    supabase
+      .from("room_members")
+      .select("user_id, is_ready")
+      .eq("room_id", room.id)
+      .then(({ data, error: readinessError }) => {
+        if (!active) return;
+        if (readinessError) {
+          setError(readinessError.message);
+          return;
+        }
+        setPartnerReady(false);
+        for (const member of (data ?? []) as RoomMemberReadiness[]) {
+          applyReadiness(member);
+        }
       });
 
     const channel = supabase
@@ -124,6 +161,22 @@ export function useYaazhRoom() {
         },
         (payload) => addMessage(payload.new as YaazhMessage),
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "room_members",
+          filter: `room_id=eq.${room.id}`,
+        },
+        (payload) => applyReadiness(payload.new as RoomMemberReadiness),
+      )
+      .on("broadcast", { event: "begin_together" }, ({ payload }) => {
+        const signal = payload as Partial<BeginSignal>;
+        if (signal.id && signal.startAt) {
+          setBeginSignal({ id: signal.id, startAt: signal.startAt });
+        }
+      })
       .on("presence", { event: "sync" }, () => {
         const presences = Object.values(channel.presenceState()).flat() as Array<{
           user_id?: string;
@@ -149,6 +202,7 @@ export function useYaazhRoom() {
     return () => {
       active = false;
       setPartnerPresent(false);
+      setPartnerReady(false);
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
@@ -247,6 +301,52 @@ export function useYaazhRoom() {
     [room, user],
   );
 
+  const setRoomReady = useCallback(
+    async (nextReady: boolean) => {
+      if (!room || !user) return false;
+
+      const previousReady = ready;
+      setReady(nextReady);
+      const { error: updateError } = await getSupabaseBrowserClient()
+        .from("room_members")
+        .update({ is_ready: nextReady })
+        .eq("room_id", room.id)
+        .eq("user_id", user.id);
+
+      if (updateError) {
+        setReady(previousReady);
+        setError(updateError.message);
+        return false;
+      }
+      return true;
+    },
+    [ready, room, user],
+  );
+
+  const beginTogether = useCallback(async () => {
+    const channel = channelRef.current;
+    if (!channel || !room || !user || !ready || !partnerReady || !partnerPresent) {
+      return false;
+    }
+
+    const signal: BeginSignal = {
+      id: crypto.randomUUID(),
+      startAt: new Date(Date.now() + 3000).toISOString(),
+    };
+    setBeginSignal(signal);
+
+    const result = await channel.send({
+      type: "broadcast",
+      event: "begin_together",
+      payload: signal,
+    });
+    if (result !== "ok") {
+      setError("The shared start signal could not be sent. Please try again.");
+      return false;
+    }
+    return true;
+  }, [partnerPresent, partnerReady, ready, room, user]);
+
   const clearError = useCallback(() => setError(null), []);
 
   return {
@@ -255,10 +355,15 @@ export function useYaazhRoom() {
     room,
     messages,
     partnerPresent,
+    ready,
+    partnerReady,
+    beginSignal,
     error,
     createRoom,
     joinRoom,
     sendMessage,
+    setReady: setRoomReady,
+    beginTogether,
     clearError,
   };
 }

@@ -50,11 +50,16 @@ export function YaazhExperience({
   const [joinCode, setJoinCode] = useState(initialRoomCode ?? "");
   const [roomCode, setRoomCode] = useState(initialRoomCode ?? demoRoomCode);
   const [copied, setCopied] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [demoReady, setDemoReady] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [localMedia, setLocalMedia] = useState<LocalMedia>(null);
-  const partnerReady = liveRoom.room ? liveRoom.partnerPresent : initialScreen === "lobby";
+  const lastBeginSignalRef = useRef<string | null>(null);
+  const ready = liveRoom.room ? liveRoom.ready : demoReady;
+  const partnerPresent = liveRoom.room ? liveRoom.partnerPresent : initialScreen === "lobby";
+  const partnerReady = liveRoom.room
+    ? liveRoom.partnerPresent && liveRoom.partnerReady
+    : initialScreen === "lobby";
 
   useEffect(() => {
     return () => {
@@ -98,9 +103,20 @@ export function YaazhExperience({
   };
 
   const beginTogether = () => {
-    if (!ready) return;
+    if (!ready || !partnerReady) return;
+    if (liveRoom.room) {
+      void liveRoom.beginTogether();
+      return;
+    }
     setCountdown(3);
   };
+
+  useEffect(() => {
+    const signal = liveRoom.beginSignal;
+    if (!signal || lastBeginSignalRef.current === signal.id) return;
+    lastBeginSignalRef.current = signal.id;
+    setCountdown(Math.max(0, Math.ceil((Date.parse(signal.startAt) - Date.now()) / 1000)));
+  }, [liveRoom.beginSignal]);
 
   useEffect(() => {
     if (countdown === null) return;
@@ -161,8 +177,15 @@ export function YaazhExperience({
             key="lobby"
             roomCode={roomCode}
             ready={ready}
+            partnerPresent={partnerPresent}
             partnerReady={partnerReady}
-            onReady={() => setReady((value) => !value)}
+            onReady={() => {
+              if (liveRoom.room) {
+                void liveRoom.setReady(!ready);
+              } else {
+                setDemoReady((value) => !value);
+              }
+            }}
             onBegin={beginTogether}
             onBack={() => setScreen("invite")}
           />
@@ -327,16 +350,16 @@ function Invite({ roomCode, copied, onCopy, onBack, onEnter }: { roomCode: strin
   );
 }
 
-function Lobby({ roomCode, ready, partnerReady, onReady, onBegin, onBack }: { roomCode: string; ready: boolean; partnerReady: boolean; onReady: () => void; onBegin: () => void; onBack: () => void }) {
+function Lobby({ roomCode, ready, partnerPresent, partnerReady, onReady, onBegin, onBack }: { roomCode: string; ready: boolean; partnerPresent: boolean; partnerReady: boolean; onReady: () => void; onBegin: () => void; onBack: () => void }) {
   return (
     <motion.section className="screen centered-screen" initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <button className="back-button" onClick={onBack}><ArrowLeft size={17} /> Invitation</button>
       <div className="lobby-heading">
         <div className="eyebrow"><span className="status-dot" /> Room {roomCode}</div>
-        <h1>{partnerReady ? "You found each other." : "Waiting beneath the same sky…"}</h1>
-        <p>{partnerReady ? "When you are both ready, begin the moment together." : "Keep this page open. Your person is on the way."}</p>
+        <h1>{partnerPresent ? "You found each other." : "Waiting beneath the same sky…"}</h1>
+        <p>{partnerPresent ? "When you are both ready, begin the moment together." : "Keep this page open. Your person is on the way."}</p>
       </div>
-      <MascotPair joined={partnerReady} />
+      <MascotPair joined={partnerPresent} />
       <div className="presence-grid">
         <div className={`presence-card ${ready ? "is-ready" : ""}`}>
           <div className="presence-avatar panda-avatar">B</div>
@@ -345,7 +368,7 @@ function Lobby({ roomCode, ready, partnerReady, onReady, onBegin, onBack }: { ro
         </div>
         <div className={`presence-card ${partnerReady ? "is-ready" : ""}`}>
           <div className="presence-avatar bear-avatar">D</div>
-          <div><strong>Your person</strong><span>{partnerReady ? "Ready and waiting" : "Joining soon"}</span></div>
+          <div><strong>Your person</strong><span>{partnerReady ? "Ready and waiting" : partnerPresent ? "Here, getting ready" : "Joining soon"}</span></div>
           <span className="presence-state">{partnerReady ? <Check size={15} /> : "…"}</span>
         </div>
       </div>
