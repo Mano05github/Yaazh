@@ -13,6 +13,9 @@ presence, chat, and playback state. Large media files are not uploaded.
    appear in **Table Editor**.
 5. Confirm Row Level Security is enabled for all four tables.
 
+If the initial migration was already applied before the room-code generator
+fix, also run `supabase/migrations/202610210002_fix_room_code_generator.sql`.
+
 ## Local environment
 
 Keep these values in `.env.local`:

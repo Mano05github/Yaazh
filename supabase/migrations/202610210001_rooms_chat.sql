@@ -1,5 +1,3 @@
-create extension if not exists pgcrypto;
-
 create table public.rooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
@@ -109,7 +107,7 @@ as $$
 declare
   raw_code text;
 begin
-  raw_code := upper(encode(gen_random_bytes(8), 'hex'));
+  raw_code := upper(replace(gen_random_uuid()::text, '-', ''));
   return substr(raw_code, 1, 4) || '-' ||
          substr(raw_code, 5, 4) || '-' ||
          substr(raw_code, 9, 4) || '-' ||
