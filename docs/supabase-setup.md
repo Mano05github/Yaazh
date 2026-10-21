@@ -15,6 +15,8 @@ presence, chat, and playback state. Large media files are not uploaded.
 
 If the initial migration was already applied before the room-code generator
 fix, also run `supabase/migrations/202610210002_fix_room_code_generator.sql`.
+If it was applied before the join-room ambiguity fix, also run
+`supabase/migrations/202610210003_fix_join_room_ambiguity.sql`.
 
 ## Local environment
 

@@ -200,8 +200,9 @@ begin
   end if;
 
   if exists (
-    select 1 from public.room_members
-    where room_id = target_room.id and user_id = current_user_id
+    select 1 from public.room_members as member
+    where member.room_id = target_room.id
+      and member.user_id = current_user_id
   ) then
     update public.rooms
       set last_active_at = now(), expires_at = now() + interval '7 days'
@@ -211,8 +212,8 @@ begin
   end if;
 
   select count(*) into member_count
-  from public.room_members
-  where room_id = target_room.id;
+  from public.room_members as member
+  where member.room_id = target_room.id;
 
   if member_count >= target_room.max_members then
     raise exception 'This room already has two participants';
