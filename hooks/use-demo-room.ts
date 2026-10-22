@@ -38,6 +38,15 @@ export function useDemoRoom(roomCode: string) {
   }, [playback]);
 
   useEffect(() => {
+    if (!incomingReaction) return;
+    const reactionId = incomingReaction.id;
+    const timer = window.setTimeout(() => {
+      setIncomingReaction((current) => current?.id === reactionId ? null : current);
+    }, 2300);
+    return () => window.clearTimeout(timer);
+  }, [incomingReaction]);
+
+  useEffect(() => {
     // Keep this identity in memory so duplicated tabs cannot inherit the same
     // sessionStorage value and mistakenly ignore one another.
     const actorId = crypto.randomUUID();

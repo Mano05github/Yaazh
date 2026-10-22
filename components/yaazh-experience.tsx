@@ -23,6 +23,7 @@ import {
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MascotPair, MascotScene } from "./mascot";
 import { RoomCatalogPicker } from "./room-catalog-picker";
+import { RoomLibrary } from "./room-library";
 import { YouTubeRoomPlayer } from "./youtube-room-player";
 import { useDemoRoom } from "@/hooks/use-demo-room";
 import { useYaazhRoom } from "@/hooks/use-yaazh-room";
@@ -31,8 +32,9 @@ import type {
   YaazhMessage,
   YaazhPlaybackState,
 } from "@/lib/rooms/types";
+import type { CatalogItem } from "@/lib/catalog/types";
 
-export type Screen = "landing" | "invite" | "lobby" | "player";
+export type Screen = "landing" | "invite" | "lobby" | "library" | "player";
 type LocalMedia = { name: string; url: string; type: "audio" | "video" } | null;
 
 const demoRoomCode = "MOON-27";
@@ -61,11 +63,17 @@ export function YaazhExperience({
   const [chatOpen, setChatOpen] = useState(false);
   const [localMedia, setLocalMedia] = useState<LocalMedia>(null);
   const lastBeginSignalRef = useRef<string | null>(null);
+  const libraryPlaybackVersionRef = useRef(0);
   const ready = liveRoom.room ? liveRoom.ready : demoReady;
   const partnerPresent = liveRoom.room ? liveRoom.partnerPresent : initialScreen === "lobby";
   const partnerReady = liveRoom.room
     ? liveRoom.partnerPresent && liveRoom.partnerReady
     : initialScreen === "lobby";
+
+  const openLibrary = useCallback(() => {
+    libraryPlaybackVersionRef.current = liveRoom.playback?.version ?? 0;
+    setScreen("library");
+  }, [liveRoom.playback?.version]);
 
   useEffect(() => {
     return () => {
@@ -129,13 +137,38 @@ export function YaazhExperience({
     if (countdown === 0) {
       const timeout = window.setTimeout(() => {
         setCountdown(null);
-        setScreen("player");
+        openLibrary();
       }, 900);
       return () => window.clearTimeout(timeout);
     }
     const timeout = window.setTimeout(() => setCountdown((value) => (value ?? 1) - 1), 900);
     return () => window.clearTimeout(timeout);
-  }, [countdown]);
+  }, [countdown, openLibrary]);
+
+  useEffect(() => {
+    const playbackState = liveRoom.playback;
+    if (screen !== "library" || !playbackState) return;
+    if (playbackState.version <= libraryPlaybackVersionRef.current) return;
+    libraryPlaybackVersionRef.current = playbackState.version;
+    if (playbackState.updated_by === liveRoom.user?.id) return;
+    if (playbackState.media_source !== "youtube" && playbackState.media_source !== "local") return;
+    const timer = window.setTimeout(() => setScreen("player"), 0);
+    return () => window.clearTimeout(timer);
+  }, [liveRoom.playback, liveRoom.user?.id, screen]);
+
+  const selectCatalogItem = (item: CatalogItem) => {
+    void liveRoom.updatePlayback({
+      mediaId: item.id,
+      mediaTitle: item.title,
+      mediaSource: "youtube",
+      mediaThumbnail: item.thumbnail,
+      durationMs: item.durationSeconds === null ? undefined : item.durationSeconds * 1000,
+      playing: false,
+      positionMs: 0,
+    }).then((selected) => {
+      if (selected) setScreen("player");
+    });
+  };
 
   const chooseMedia = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -205,6 +238,15 @@ export function YaazhExperience({
             onBack={() => setScreen("invite")}
           />
         )}
+        {screen === "library" && (
+          <RoomLibrary
+            key="library"
+            roomCode={roomCode}
+            partnerPresent={liveRoom.partnerPresent}
+            onBack={() => setScreen("lobby")}
+            onSelect={selectCatalogItem}
+          />
+        )}
         {screen === "player" && (
           <Player
             key="player"
@@ -212,7 +254,7 @@ export function YaazhExperience({
             onChooseMedia={chooseMedia}
             chatOpen={chatOpen}
             onChat={() => setChatOpen((value) => !value)}
-            onLeave={() => setScreen("lobby")}
+            onLeave={openLibrary}
             roomCode={roomCode}
             roomPartnerPresent={liveRoom.partnerPresent}
             roomPlayback={liveRoom.room && liveRoom.playback ? {
@@ -253,12 +295,9 @@ function Header({ screen, onLogoClick }: { screen: Screen; onLogoClick: () => vo
         <span className="brand-mark">யா</span>
         <span>Yaazh</span>
       </button>
-      <div className="site-header-right">
-        {screen === "landing" && <nav className="site-nav"><a href="/music">Music</a><a href="/watch">Watch</a></nav>}
-        <div className="header-status">
-          <span className="status-dot" />
-          {screen === "landing" ? "A private place for two" : "Private room"}
-        </div>
+      <div className="header-status">
+        <span className="status-dot" />
+        {screen === "landing" ? "A private place for two" : "Private room"}
       </div>
     </header>
   );

@@ -17,10 +17,10 @@ Enable **YouTube Data API v3** in Google Cloud, create an API key restricted to
 that API, and add it as the server-only `YOUTUBE_DATA_API_KEY` value in
 `.env.local`. Do not prefix this key with `NEXT_PUBLIC_`.
 
-- `/music` displays popular music and music search.
-- `/watch` displays popular entertainment and video search.
-- A connected room can use **Browse together** to select one YouTube item for
-  both participants.
+- Music and Watch tabs appear only after both participants enter a room and
+  choose **Begin together**.
+- Selecting an item from the shared room library opens it for both participants.
+- A connected player can use **Browse together** to replace the current item.
 
 YouTube search consumes substantially more API quota than popular-video lists,
 so Yaazh caches identical search requests for one hour.

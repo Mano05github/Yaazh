@@ -1,6 +1,6 @@
 import { YaazhExperience } from "@/components/yaazh-experience";
 
-type PreviewScreen = "landing" | "invite" | "lobby" | "player";
+type PreviewScreen = "landing" | "invite" | "lobby" | "library" | "player";
 
 export default async function Home({
   searchParams,
@@ -16,7 +16,7 @@ export default async function Home({
 
   const requested = parameters.preview;
   const initialScreen: PreviewScreen =
-    typeof requested === "string" && ["invite", "lobby", "player"].includes(requested)
+    typeof requested === "string" && ["invite", "lobby", "library", "player"].includes(requested)
       ? (requested as PreviewScreen)
       : "landing";
 
