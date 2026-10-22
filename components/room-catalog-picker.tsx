@@ -5,11 +5,14 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import type { CatalogItem, CatalogMode, CatalogResponse } from "@/lib/catalog/types";
+import { fetchRoomCatalog } from "@/lib/catalog/client";
 
 export function RoomCatalogPicker({
+  roomId,
   onClose,
   onSelect,
 }: {
+  roomId: string;
   onClose: () => void;
   onSelect: (item: CatalogItem) => void;
 }) {
@@ -23,18 +26,13 @@ export function RoomCatalogPicker({
     setLoading(true);
     setError(null);
     try {
-      const parameters = new URLSearchParams({ mode });
-      if (nextQuery) parameters.set("q", nextQuery);
-      const response = await fetch(`/api/catalog/youtube?${parameters}`);
-      const payload = (await response.json()) as CatalogResponse & { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? "The catalogue could not be loaded.");
-      setCatalog(payload);
+      setCatalog(await fetchRoomCatalog({ roomId, mode, query: nextQuery }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The catalogue could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [mode]);
+  }, [mode, roomId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(""), 0);

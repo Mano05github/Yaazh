@@ -9,7 +9,10 @@ and keeping playback synchronized across browsers and devices.
 2. Copy `.env.example` to `.env.local` and add the Supabase public URL and anon key.
 3. Enable anonymous sign-ins in Supabase Authentication.
 4. Run the SQL files in `supabase/migrations` in filename order.
-5. Run `npm run dev` and open `http://localhost:3000`.
+5. In **Supabase > Realtime > Settings**, disable **Allow public access**. The
+   application uses authenticated private channels after migration `006`.
+6. Complete the production checklist in [SECURITY.md](SECURITY.md).
+7. Run `npm run dev` and open `http://localhost:3000`.
 
 ## YouTube catalogue
 
@@ -23,7 +26,8 @@ that API, and add it as the server-only `YOUTUBE_DATA_API_KEY` value in
 - A connected player can use **Browse together** to replace the current item.
 
 YouTube search consumes substantially more API quota than popular-video lists,
-so Yaazh caches identical search requests for one hour.
+so Yaazh caches identical search requests for one hour. The API route also
+requires an active room membership and applies per-user browse/search limits.
 
 ## Verification
 

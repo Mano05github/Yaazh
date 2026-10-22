@@ -177,7 +177,10 @@ export function useYaazhRoom() {
 
     const channel = supabase
       .channel(`room:${room.id}`, {
-        config: { presence: { key: tabIdRef.current } },
+        config: {
+          private: true,
+          presence: { key: tabIdRef.current },
+        },
       })
       .on(
         "postgres_changes",

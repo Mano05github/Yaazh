@@ -238,9 +238,10 @@ export function YaazhExperience({
             onBack={() => setScreen("invite")}
           />
         )}
-        {screen === "library" && (
+        {screen === "library" && liveRoom.room && (
           <RoomLibrary
             key="library"
+            roomId={liveRoom.room.id}
             roomCode={roomCode}
             partnerPresent={liveRoom.partnerPresent}
             onBack={() => setScreen("lobby")}
@@ -255,6 +256,7 @@ export function YaazhExperience({
             chatOpen={chatOpen}
             onChat={() => setChatOpen((value) => !value)}
             onLeave={openLibrary}
+            roomId={liveRoom.room?.id ?? null}
             roomCode={roomCode}
             roomPartnerPresent={liveRoom.partnerPresent}
             roomPlayback={liveRoom.room && liveRoom.playback ? {
@@ -472,6 +474,7 @@ type PlayerProps = {
   chatOpen: boolean;
   onChat: () => void;
   onLeave: () => void;
+  roomId: string | null;
   roomCode: string;
   roomPartnerPresent: boolean;
   roomPlayback?: {
@@ -485,7 +488,7 @@ type PlayerProps = {
   };
 };
 
-function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode, roomPartnerPresent, roomPlayback, roomChat }: PlayerProps) {
+function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, roomCode, roomPartnerPresent, roomPlayback, roomChat }: PlayerProps) {
   const { playback: demoPlayback, updatePlayback: updateDemoPlayback, partnerPresent: demoPartnerPresent, incomingReaction, sendReaction } = useDemoRoom(roomCode);
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const [volume, setVolume] = useState(72);
@@ -686,8 +689,9 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomCode
         )}
       </AnimatePresence>
 
-      {catalogOpen && roomPlayback && (
+      {catalogOpen && roomPlayback && roomId && (
         <RoomCatalogPicker
+          roomId={roomId}
           onClose={() => setCatalogOpen(false)}
           onSelect={(item) => {
             void roomPlayback.update({
