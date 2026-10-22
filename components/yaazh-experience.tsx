@@ -10,20 +10,18 @@ import {
   Heart,
   Link2,
   MessageCircle,
-  Pause,
   Play,
   Plus,
   Send,
-  SkipForward,
   Sparkles,
   UsersRound,
-  Volume2,
   X,
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MascotPair, MascotScene } from "./mascot";
 import { RoomCatalogPicker } from "./room-catalog-picker";
 import { RoomLibrary } from "./room-library";
+import { SharedPlayerControls } from "./shared-player-controls";
 import { YouTubeRoomPlayer } from "./youtube-room-player";
 import { useDemoRoom } from "@/hooks/use-demo-room";
 import { useYaazhRoom } from "@/hooks/use-yaazh-room";
@@ -39,11 +37,6 @@ type LocalMedia = { name: string; url: string; type: "audio" | "video" } | null;
 
 const demoRoomCode = "MOON-27";
 const reactions = ["♥", "🥹", "😂", "🫶"];
-
-function formatTime(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
-}
 
 export function YaazhExperience({
   initialScreen = "landing",
@@ -491,7 +484,9 @@ type PlayerProps = {
 function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, roomCode, roomPartnerPresent, roomPlayback, roomChat }: PlayerProps) {
   const { playback: demoPlayback, updatePlayback: updateDemoPlayback, partnerPresent: demoPartnerPresent, incomingReaction, sendReaction } = useDemoRoom(roomCode);
   const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const playerStageRef = useRef<HTMLDivElement | null>(null);
   const [volume, setVolume] = useState(72);
+  const [fullscreen, setFullscreen] = useState(false);
   const [playbackClock, setPlaybackClock] = useState(0);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -528,6 +523,14 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, 
   }, [livePlayback?.playing]);
 
   useEffect(() => {
+    const updateFullscreenState = () => {
+      setFullscreen(document.fullscreenElement === playerStageRef.current);
+    };
+    document.addEventListener("fullscreenchange", updateFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreenState);
+  }, []);
+
+  useEffect(() => {
     if (roomPlayback) return;
     if (localMedia) return;
     if (!playback.playing) return;
@@ -545,6 +548,10 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, 
     if (!playback.playing && !media.paused) media.pause();
   }, [localMedia, playback.playing, playback.position, updatePlayback]);
 
+  useEffect(() => {
+    if (mediaRef.current) mediaRef.current.volume = volume / 100;
+  }, [localMedia, volume]);
+
   const togglePlayback = () => {
     const position = mediaRef.current?.currentTime ?? playback.position;
     updatePlayback({ playing: !playback.playing, position });
@@ -555,10 +562,29 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, 
     updatePlayback({ position });
   };
 
+  const toggleFullscreen = async () => {
+    const stage = playerStageRef.current;
+    if (!stage) return;
+    try {
+      if (document.fullscreenElement === stage) {
+        await document.exitFullscreen();
+        return;
+      }
+      await stage.requestFullscreen();
+    } catch {
+      setFullscreen(false);
+    }
+  };
+
+  const changeVolume = (nextVolume: number) => {
+    const normalizedVolume = Math.min(Math.max(nextVolume, 0), 100);
+    setVolume(normalizedVolume);
+    if (mediaRef.current) mediaRef.current.volume = normalizedVolume / 100;
+  };
+
   const title = livePlayback?.media_title ?? localMedia?.name ?? "Until We Meet Again";
   const duration = playback.duration;
   const position = playback.position;
-  const progress = Math.min(100, (position / Math.max(duration, 1)) * 100);
 
   const sendMessage = async () => {
     const nextMessage = message.trim();
@@ -583,7 +609,7 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, 
         <button className="icon-button" onClick={onChat} aria-label="Open chat"><MessageCircle size={19} /></button>
       </div>
 
-      <div className="player-stage">
+      <div className="player-stage" ref={playerStageRef}>
         <div className="ambient-disc disc-one" />
         <div className="ambient-disc disc-two" />
         {youtubeId ? (
@@ -638,6 +664,20 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, 
             </motion.div>
           )}
         </AnimatePresence>
+
+        <SharedPlayerControls
+          playing={playback.playing}
+          position={position}
+          duration={duration}
+          volume={volume}
+          fullscreen={fullscreen}
+          reactions={reactions}
+          onTogglePlayback={togglePlayback}
+          onSeek={seek}
+          onVolumeChange={changeVolume}
+          onToggleFullscreen={() => void toggleFullscreen()}
+          onReaction={sendReaction}
+        />
       </div>
 
       <div className="now-playing">
@@ -646,29 +686,6 @@ function Player({ localMedia, onChooseMedia, chatOpen, onChat, onLeave, roomId, 
           {roomPlayback && <button className="button button-primary" onClick={() => setCatalogOpen(true)}><Play size={16} /> Browse together</button>}
           <label className="add-media button button-ghost"><Plus size={17} /> Choose media<input type="file" accept="audio/*,video/mp4,video/webm" onChange={onChooseMedia} /></label>
         </div>
-      </div>
-
-      <div className="timeline">
-        <input
-          aria-label="Playback position"
-          type="range"
-          min="0"
-          max={Math.max(duration || 0, 1)}
-          value={Math.min(position, duration || 1)}
-          onChange={(event) => seek(Number(event.target.value))}
-          style={{ "--progress": `${progress}%` } as React.CSSProperties}
-        />
-        <div><span>{formatTime(position)}</span><span>-{formatTime(Math.max(0, duration - position))}</span></div>
-      </div>
-
-      <div className="player-controls">
-        <div className="volume-control"><Volume2 size={18} /><input aria-label="Volume" type="range" min="0" max="100" value={volume} onChange={(event) => { setVolume(Number(event.target.value)); if (mediaRef.current) mediaRef.current.volume = Number(event.target.value) / 100; }} /></div>
-        <div className="transport">
-          <button className="transport-side" onClick={() => seek(Math.max(0, position - 10))}>10</button>
-          <button className="play-button" onClick={togglePlayback} aria-label={playback.playing ? "Pause" : "Play"}>{playback.playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</button>
-          <button className="transport-side" onClick={() => seek(Math.min(duration, position + 10))}><SkipForward size={19} /></button>
-        </div>
-        <div className="reaction-bar">{reactions.map((emoji) => <button key={emoji} onClick={() => sendReaction(emoji)}>{emoji}</button>)}</div>
       </div>
 
       <AnimatePresence>

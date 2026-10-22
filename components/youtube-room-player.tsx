@@ -107,8 +107,10 @@ export function YouTubeRoomPlayer({
         videoId,
         playerVars: {
           autoplay: 0,
-          controls: 1,
+          controls: 0,
+          disablekb: 1,
           enablejsapi: 1,
+          fs: 0,
           playsinline: 1,
           rel: 0,
           origin: window.location.origin,
@@ -153,6 +155,25 @@ export function YouTubeRoomPlayer({
     if (playing && playerState !== window.YT?.PlayerState.PLAYING) player.playVideo();
     if (!playing && playerState === window.YT?.PlayerState.PLAYING) player.pauseVideo();
   }, [playing, ready, version]);
+
+  useEffect(() => {
+    if (!ready) return;
+
+    const timer = window.setInterval(() => {
+      const player = playerRef.current;
+      if (!player || Date.now() < suppressEventsUntilRef.current) return;
+
+      const targetPosition = positionRef.current;
+      const drift = Math.abs(player.getCurrentTime() - targetPosition);
+      const tolerance = latestRef.current.playing ? 1.75 : 0.65;
+      if (drift <= tolerance) return;
+
+      suppressEventsUntilRef.current = Date.now() + 900;
+      player.seekTo(targetPosition, true);
+    }, 800);
+
+    return () => window.clearInterval(timer);
+  }, [ready]);
 
   useEffect(() => {
     if (ready) playerRef.current?.setVolume(volume);
